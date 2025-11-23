@@ -1,0 +1,7 @@
+{
+  "name": "Rent-Mimi.com",
+  "description": "A web application for a dating service, featuring a photo gallery of available partners and an AI-powered FAQ chatbot to assist users.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
