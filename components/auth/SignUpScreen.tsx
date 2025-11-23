@@ -39,11 +39,6 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
   }, []);
 
   const setupRecaptcha = async () => {
-      // 1. Reuse existing verifier if valid
-      if (verifierRef.current) {
-          return verifierRef.current;
-      }
-
       const container = document.getElementById(containerId);
       if (!container) {
           console.error(`Recaptcha container not found`);
@@ -51,11 +46,17 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
       }
 
       try {
-          // 2. Robust Cleanup
+          // 1. Robust Cleanup
+          if (verifierRef.current) {
+              try { verifierRef.current.clear(); } catch(e) {}
+              verifierRef.current = null;
+          }
           if ((window as any).recaptchaVerifier) {
               try { (window as any).recaptchaVerifier.clear(); } catch(e) {}
               (window as any).recaptchaVerifier = null;
           }
+          
+          // 2. Clear DOM container
           container.innerHTML = '';
 
           // 3. Create new verifier
@@ -138,7 +139,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
 
         if (error.code === 'auth/internal-error') {
             const domain = window.location.hostname;
-            const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인(${domain})이 Firebase 콘솔에 등록되지 않았습니다.\n실제 도메인(Vercel 등)에 배포 후 해당 도메인을 등록해주세요.`;
+            const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인: ${domain}\n\nFirebase 콘솔 > Authentication > Settings > Authorized domains 에 위 도메인을 추가해주세요.`;
             alert(msg);
             setError(msg);
         } else if (error.code === 'auth/invalid-phone-number') {
@@ -190,7 +191,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4 pb-32">
+    <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-sm mx-auto">
         <div className="flex flex-col items-center mb-8">
           <HeartIcon className="w-16 h-16 text-primary-pink" />
@@ -256,7 +257,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6 mb-8">
+        <p className="text-center text-sm text-gray-500 mt-6">
           이미 회원이신가요?{' '}
           <button onClick={onNavigateToLogin} className="font-semibold text-primary-pink hover:underline">
             로그인하기

@@ -36,11 +36,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
     }, []);
 
     const setupRecaptcha = async () => {
-        // 1. Reuse existing verifier if valid
-        if (verifierRef.current) {
-            return verifierRef.current;
-        }
-
         const container = document.getElementById(containerId);
         if (!container) {
             console.error("Recaptcha container not found");
@@ -48,11 +43,17 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         }
 
         try {
-            // 2. Robust Cleanup
+            // 1. Robust Cleanup: Clear global and local instances
+            if (verifierRef.current) {
+                try { verifierRef.current.clear(); } catch(e) {}
+                verifierRef.current = null;
+            }
             if ((window as any).recaptchaVerifier) {
                 try { (window as any).recaptchaVerifier.clear(); } catch(e) {}
                 (window as any).recaptchaVerifier = null;
             }
+            
+            // 2. Clear DOM container manually to prevent "already rendered" error
             container.innerHTML = '';
 
             // 3. Create new verifier
@@ -68,16 +69,17 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
                 }
             });
             
-            // 4. Render
+            // 4. Render explicitly
             await verifier.render();
             
-            // 5. Store
+            // 5. Store references
             verifierRef.current = verifier;
             (window as any).recaptchaVerifier = verifier;
             
             return verifier;
         } catch (e) {
             console.error("Recaptcha init failed", e);
+            // Clean up if failed
             verifierRef.current = null;
             container.innerHTML = '';
             return null;
@@ -136,7 +138,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
 
             if (error.code === 'auth/internal-error') {
                 const domain = window.location.hostname;
-                const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인(${domain})이 Firebase 콘솔에 등록되지 않았습니다.\n실제 도메인(Vercel 등)에 배포 후 해당 도메인을 등록해주세요.`;
+                const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인: ${domain}\n\nFirebase 콘솔 > Authentication > Settings > Authorized domains 에 위 도메인을 추가해주세요.`;
                 alert(msg);
                 setError(msg);
             } else if (error.code === 'auth/invalid-phone-number') {
@@ -250,7 +252,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6 mb-8">
+        <p className="text-center text-sm text-gray-500 mt-6">
           아직 회원이 아니신가요?{' '}
           <button onClick={onNavigateToSignUp} className="font-semibold text-primary-pink hover:underline">
             회원가입하기
