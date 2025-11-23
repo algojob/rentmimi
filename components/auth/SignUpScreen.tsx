@@ -23,69 +23,56 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
   const verifierRef = useRef<RecaptchaVerifier | null>(null);
   const containerId = 'recaptcha-container-signup';
 
+  // Initialize Recaptcha ON MOUNT
   useEffect(() => {
-    // Cleanup on unmount
+    const initRecaptcha = async () => {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // 1. Cleanup
+        if ((window as any).recaptchaVerifier) {
+            try {
+                (window as any).recaptchaVerifier.clear();
+            } catch (e) {}
+            (window as any).recaptchaVerifier = null;
+        }
+        container.innerHTML = '';
+
+        // 2. Create and Render
+        try {
+            const verifier = new RecaptchaVerifier(auth, containerId, {
+                'size': 'invisible',
+                'callback': () => {
+                    console.log("reCAPTCHA solved");
+                },
+                'expired-callback': () => {
+                     setError('보안 인증이 만료되었습니다. 페이지를 새로고침 해주세요.');
+                }
+            });
+            
+            await verifier.render();
+            verifierRef.current = verifier;
+            (window as any).recaptchaVerifier = verifier;
+        } catch (err) {
+            console.error("Recaptcha initialization failed", err);
+        }
+    };
+
+    const timer = setTimeout(initRecaptcha, 100);
+
     return () => {
+        clearTimeout(timer);
         if (verifierRef.current) {
             try {
                 verifierRef.current.clear();
             } catch (e) {}
-            verifierRef.current = null;
         }
+        verifierRef.current = null;
         if ((window as any).recaptchaVerifier) {
             (window as any).recaptchaVerifier = null;
         }
     };
   }, []);
-
-  const setupRecaptcha = async () => {
-      const container = document.getElementById(containerId);
-      if (!container) {
-          console.error(`Recaptcha container not found`);
-          return null;
-      }
-
-      try {
-          // 1. Robust Cleanup
-          if (verifierRef.current) {
-              try { verifierRef.current.clear(); } catch(e) {}
-              verifierRef.current = null;
-          }
-          if ((window as any).recaptchaVerifier) {
-              try { (window as any).recaptchaVerifier.clear(); } catch(e) {}
-              (window as any).recaptchaVerifier = null;
-          }
-          
-          container.innerHTML = '';
-
-          // 2. Create new verifier (Invisible)
-          const verifier = new RecaptchaVerifier(auth, containerId, {
-              'size': 'invisible',
-              'callback': () => {
-                  console.log("reCAPTCHA solved");
-              },
-              'expired-callback': () => {
-                   setError('보안 인증이 만료되었습니다. 다시 시도해주세요.');
-                   setIsLoading(false);
-                   verifierRef.current = null;
-              }
-          });
-          
-          // 3. Render
-          await verifier.render();
-          
-          // 4. Store
-          verifierRef.current = verifier;
-          (window as any).recaptchaVerifier = verifier;
-          
-          return verifier;
-      } catch (e) {
-          console.error("Recaptcha init failed", e);
-          verifierRef.current = null;
-          container.innerHTML = '';
-          return null;
-      }
-  };
 
   const formatPhoneNumber = (phone: string) => {
     let cleanPhone = phone.replace(/-/g, '').trim();
@@ -112,10 +99,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
         return;
     }
 
-    // Init Recaptcha Lazy/JIT
-    const appVerifier = await setupRecaptcha();
-    if (!appVerifier) {
-         setError('보안 검증 시스템 초기화 실패. 새로고침 후 다시 시도해주세요.');
+    if (!verifierRef.current) {
+         setError('보안 시스템 로딩 중입니다. 잠시 후 다시 시도하거나 페이지를 새로고침 해주세요.');
          setIsLoading(false);
          return;
     }
@@ -123,33 +108,31 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
     const formattedPhone = formatPhoneNumber(cleanPhone);
 
     try {
-        const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+        const confirmation = await signInWithPhoneNumber(auth, formattedPhone, verifierRef.current);
         setConfirmationResult(confirmation);
-        alert("✅ 인증번호 요청 성공!\n\n1. 문자가 안 오면 '스팸 메시지함'을 확인하세요.\n2. '테스트용 전화번호'로 등록하셨다면, 설정해둔 인증코드를 입력하세요.");
+        alert("인증번호가 발송되었습니다.\n\n[중요] 문자가 안 오면 '스팸 메시지함'을 꼭 확인해주세요.\n(테스트 번호는 지정된 코드를 입력하세요)");
     } catch (error: any) {
         console.error("Error sending SMS", error);
         
-        // Cleanup on error
-        if (verifierRef.current) {
-            try { verifierRef.current.clear(); } catch(e) {}
-            verifierRef.current = null;
-            const container = document.getElementById(containerId);
-            if (container) container.innerHTML = '';
-        }
-
         if (error.code === 'auth/internal-error') {
             const domain = window.location.hostname;
             const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인: ${domain}\n\nFirebase 콘솔 > Authentication > Settings > Authorized domains 에 위 도메인을 추가해주세요.`;
+            alert(msg);
+            setError(msg);
+        } else if (error.code === 'auth/invalid-app-credential') {
+            const msg = `⛔ 앱 인증 실패 (invalid-app-credential) ⛔\n\n1. Firebase 콘솔 'Authorized domains'에 현재 도메인(${window.location.hostname})이 등록되어 있는지 확인하세요.\n2. Google Cloud Console에서 API Key 제한(HTTP Referrer) 설정을 확인하세요.`;
             alert(msg);
             setError(msg);
         } else if (error.code === 'auth/invalid-phone-number') {
             setError('전화번호 형식이 올바르지 않습니다.');
         } else if (error.code === 'auth/too-many-requests') {
             setError('너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해주세요.');
-        } else if (error.code === 'auth/billing-not-enabled') {
-             setError('Firebase 요금제 확인이 필요합니다. (무료 할당량 초과 가능성)');
         } else {
             setError(`인증번호 전송에 실패했습니다: ${error.message}`);
+        }
+
+        if (verifierRef.current) {
+            try { verifierRef.current.reset(); } catch(e) {}
         }
     } finally {
         setIsLoading(false);
@@ -231,7 +214,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
                 disabled={isLoading || !!confirmationResult}
                 className="flex-shrink-0 px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-r-2xl hover:bg-gray-300 disabled:opacity-50"
               >
-                {confirmationResult ? '재전송' : '인증요청'}
+                {confirmationResult ? '전송됨' : '인증번호 받기'}
               </button>
             </div>
           </div>
