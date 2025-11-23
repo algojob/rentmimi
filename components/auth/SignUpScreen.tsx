@@ -56,12 +56,11 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
               (window as any).recaptchaVerifier = null;
           }
           
-          // 2. Clear DOM container
           container.innerHTML = '';
 
-          // 3. Create new verifier
+          // 2. Create new verifier (Visible Checkbox)
           const verifier = new RecaptchaVerifier(auth, containerId, {
-              'size': 'invisible',
+              'size': 'normal',
               'callback': () => {
                   console.log("reCAPTCHA solved");
               },
@@ -72,10 +71,10 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
               }
           });
           
-          // 4. Render
+          // 3. Render
           await verifier.render();
           
-          // 5. Store
+          // 4. Store
           verifierRef.current = verifier;
           (window as any).recaptchaVerifier = verifier;
           
@@ -114,7 +113,11 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
     }
 
     // Init Recaptcha Lazy/JIT
-    const appVerifier = await setupRecaptcha();
+    let appVerifier = verifierRef.current;
+    if (!appVerifier) {
+         appVerifier = await setupRecaptcha();
+    }
+
     if (!appVerifier) {
          setError('보안 검증 시스템 초기화 실패. 새로고침 후 다시 시도해주세요.');
          setIsLoading(false);
@@ -126,6 +129,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
     try {
         const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
         setConfirmationResult(confirmation);
+        alert("인증번호가 발송되었습니다.\n\n[중요] 문자가 오지 않으면 '스팸 메시지함'을 꼭 확인해주세요!\n(테스트 번호는 설정된 코드를 입력하세요)");
     } catch (error: any) {
         console.error("Error sending SMS", error);
         
@@ -214,27 +218,34 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
 
           <div>
             <label htmlFor="phone-signup" className="text-sm font-medium text-gray-700">전화번호</label>
-            <div className="flex items-center mt-1">
+            <div className="flex flex-col mt-1 gap-3">
               <input 
                 type="tel" 
                 id="phone-signup" 
                 value={phone} 
                 onChange={e => setPhone(e.target.value)} 
                 placeholder="예: 01012345678" 
-                className="flex-grow w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink" 
+                className="w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink" 
               />
+              
+              {/* Visible Recaptcha Container */}
+              <div id={containerId} className="flex justify-center my-2 min-h-[78px]"></div>
+
               <button 
                 type="button" 
                 onClick={handleGetCode} 
                 disabled={isLoading || !!confirmationResult}
-                className="flex-shrink-0 px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-r-2xl hover:bg-gray-300 disabled:opacity-50"
+                className="w-full px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-2xl hover:bg-gray-300 disabled:opacity-50 transition-colors"
               >
-                {confirmationResult ? '전송됨' : '인증번호 받기'}
+                {confirmationResult ? '인증번호 재전송' : '인증번호 받기'}
               </button>
             </div>
+            <p className="text-xs text-gray-400 mt-2 text-center">
+                문자가 오지 않는 경우 스팸함을 확인해주세요.
+            </p>
           </div>
           {confirmationResult && (
-            <div>
+            <div className="animate-fade-in">
               <label htmlFor="otp-signup" className="text-sm font-medium text-gray-700">인증번호</label>
               <input type="number" id="otp-signup" value={otp} onChange={e => setOtp(e.target.value)} placeholder="인증번호 6자리 입력" className="mt-1 w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink" />
             </div>
@@ -249,8 +260,6 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
                   {error}
                </div>
            )}
-           
-           <div id={containerId}></div>
 
           <button type="submit" disabled={!confirmationResult || isLoading} className="w-full bg-primary-pink text-white font-bold py-3 px-6 rounded-2xl transition-transform transform hover:scale-105 disabled:bg-gray-300">
              {isLoading ? '처리중...' : '회원가입 완료'}
