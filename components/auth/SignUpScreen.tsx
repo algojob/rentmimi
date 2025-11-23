@@ -58,9 +58,9 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
           
           container.innerHTML = '';
 
-          // 2. Create new verifier (Visible Checkbox)
+          // 2. Create new verifier (Invisible)
           const verifier = new RecaptchaVerifier(auth, containerId, {
-              'size': 'normal',
+              'size': 'invisible',
               'callback': () => {
                   console.log("reCAPTCHA solved");
               },
@@ -113,11 +113,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
     }
 
     // Init Recaptcha Lazy/JIT
-    let appVerifier = verifierRef.current;
-    if (!appVerifier) {
-         appVerifier = await setupRecaptcha();
-    }
-
+    const appVerifier = await setupRecaptcha();
     if (!appVerifier) {
          setError('보안 검증 시스템 초기화 실패. 새로고침 후 다시 시도해주세요.');
          setIsLoading(false);
@@ -129,7 +125,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
     try {
         const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
         setConfirmationResult(confirmation);
-        alert("인증번호가 발송되었습니다.\n\n[중요] 문자가 오지 않으면 '스팸 메시지함'을 꼭 확인해주세요!\n(테스트 번호는 설정된 코드를 입력하세요)");
+        alert("✅ 인증번호 요청 성공!\n\n1. 문자가 안 오면 '스팸 메시지함'을 확인하세요.\n2. '테스트용 전화번호'로 등록하셨다면, 설정해둔 인증코드를 입력하세요.");
     } catch (error: any) {
         console.error("Error sending SMS", error);
         
@@ -150,6 +146,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
             setError('전화번호 형식이 올바르지 않습니다.');
         } else if (error.code === 'auth/too-many-requests') {
             setError('너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해주세요.');
+        } else if (error.code === 'auth/billing-not-enabled') {
+             setError('Firebase 요금제 확인이 필요합니다. (무료 할당량 초과 가능성)');
         } else {
             setError(`인증번호 전송에 실패했습니다: ${error.message}`);
         }
@@ -218,31 +216,24 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
 
           <div>
             <label htmlFor="phone-signup" className="text-sm font-medium text-gray-700">전화번호</label>
-            <div className="flex flex-col mt-1 gap-3">
+            <div className="flex items-center mt-1">
               <input 
                 type="tel" 
                 id="phone-signup" 
                 value={phone} 
                 onChange={e => setPhone(e.target.value)} 
                 placeholder="예: 01012345678" 
-                className="w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink" 
+                className="flex-grow w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink" 
               />
-              
-              {/* Visible Recaptcha Container */}
-              <div id={containerId} className="flex justify-center my-2 min-h-[78px]"></div>
-
               <button 
                 type="button" 
                 onClick={handleGetCode} 
                 disabled={isLoading || !!confirmationResult}
-                className="w-full px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-2xl hover:bg-gray-300 disabled:opacity-50 transition-colors"
+                className="flex-shrink-0 px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-r-2xl hover:bg-gray-300 disabled:opacity-50"
               >
-                {confirmationResult ? '인증번호 재전송' : '인증번호 받기'}
+                {confirmationResult ? '재전송' : '인증요청'}
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-2 text-center">
-                문자가 오지 않는 경우 스팸함을 확인해주세요.
-            </p>
           </div>
           {confirmationResult && (
             <div className="animate-fade-in">
@@ -260,6 +251,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ onSignUp, onNavigateToLogin
                   {error}
                </div>
            )}
+           
+           <div id={containerId}></div>
 
           <button type="submit" disabled={!confirmationResult || isLoading} className="w-full bg-primary-pink text-white font-bold py-3 px-6 rounded-2xl transition-transform transform hover:scale-105 disabled:bg-gray-300">
              {isLoading ? '처리중...' : '회원가입 완료'}

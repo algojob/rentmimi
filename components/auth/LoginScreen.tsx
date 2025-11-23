@@ -43,7 +43,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         }
 
         try {
-            // 1. Cleanup existing
+            // 1. Robust Cleanup
             if (verifierRef.current) {
                 try { verifierRef.current.clear(); } catch(e) {}
                 verifierRef.current = null;
@@ -53,15 +53,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
                 (window as any).recaptchaVerifier = null;
             }
             
-            // 2. Clear DOM
             container.innerHTML = '';
 
-            // 3. Create new verifier (Using 'normal' size for better reliability)
+            // 2. Create new verifier (Invisible)
             const verifier = new RecaptchaVerifier(auth, containerId, {
-                'size': 'normal',
+                'size': 'invisible',
                 'callback': () => {
                     console.log("reCAPTCHA solved");
-                    // Auto-trigger SMS could be added here, but let's keep it manual for safety
                 },
                 'expired-callback': () => {
                     setError('보안 인증이 만료되었습니다. 다시 시도해주세요.');
@@ -70,10 +68,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
                 }
             });
             
-            // 4. Render
+            // 3. Render explicitly
             await verifier.render();
             
-            // 5. Store
+            // 4. Store references
             verifierRef.current = verifier;
             (window as any).recaptchaVerifier = verifier;
             
@@ -110,10 +108,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         }
 
         // Initialize Recaptcha Just-In-Time
-        let appVerifier = verifierRef.current;
-        if (!appVerifier) {
-             appVerifier = await setupRecaptcha();
-        }
+        const appVerifier = await setupRecaptcha();
         
         if (!appVerifier) {
              setError('보안 시스템 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
@@ -126,7 +121,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         try {
             const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
             setConfirmationResult(confirmation);
-            alert("인증번호가 발송되었습니다.\n\n[중요] 문자가 오지 않으면 '스팸 메시지함'을 꼭 확인해주세요!\n(테스트 번호는 설정된 코드를 입력하세요)");
+            alert("✅ 인증번호 요청 성공!\n\n1. 문자가 안 오면 '스팸 메시지함'을 확인하세요.\n2. '테스트용 전화번호'로 등록하셨다면, 설정해둔 인증코드를 입력하세요.");
         } catch (error: any) {
             console.error("Error sending SMS", error);
             
@@ -149,8 +144,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
                 setError('너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해주세요.');
             } else if (error.code === 'auth/captcha-check-failed') {
                  setError('reCAPTCHA 검증에 실패했습니다. 다시 시도해주세요.');
+            } else if (error.code === 'auth/billing-not-enabled') {
+                 setError('Firebase 요금제 확인이 필요합니다. (무료 할당량 초과 가능성)');
             } else {
-                setError(`인증번호 전송 실패: ${error.message}`);
+                setError(`인증번호 전송 실패 (${error.code}): ${error.message}`);
             }
         } finally {
             setIsLoading(false);
@@ -203,33 +200,25 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-lg space-y-6">
           <div>
             <label htmlFor="phone" className="text-sm font-medium text-gray-700">전화번호</label>
-            <div className="flex flex-col mt-1 gap-3">
+            <div className="flex items-center mt-1">
               <input
                 type="tel"
                 id="phone"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="예: 01012345678"
-                className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink"
+                className="flex-grow w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink"
               />
-              
-              {/* Visible Recaptcha Container */}
-              <div id={containerId} className="flex justify-center my-2 min-h-[78px]"></div>
-
               <button 
                 type="button" 
                 onClick={handleGetCode} 
                 disabled={isLoading || !!confirmationResult}
-                className="w-full px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-2xl hover:bg-gray-300 disabled:opacity-50 transition-colors"
+                className="flex-shrink-0 px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-r-2xl hover:bg-gray-300 disabled:opacity-50"
               >
-                {confirmationResult ? '인증번호 재전송' : '인증번호 받기 (문자 발송)'}
+                {confirmationResult ? '재전송' : '인증요청'}
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-2 text-center">
-                문자가 오지 않는 경우 스팸함을 확인해주세요.
-            </p>
           </div>
-          
           {confirmationResult && (
           <div className="animate-fade-in">
             <label htmlFor="otp" className="text-sm font-medium text-gray-700">인증번호</label>
@@ -249,6 +238,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
                   {error}
               </div>
           )}
+          
+          {/* Container ID for invisible reCAPTCHA */}
+          <div id={containerId}></div>
 
           <button
             type="submit"
