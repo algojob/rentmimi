@@ -1,12 +1,29 @@
+
 import { GoogleGenAI } from "@google/genai";
 
-const API_KEY = process.env.API_KEY;
+// Helper to safely get API Key in Vite environment
+const getApiKey = () => {
+  // Check for Vite environment variable first
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_KEY) {
+    return (import.meta as any).env.VITE_API_KEY;
+  }
+  // Fallback for other environments (if any), handled safely
+  try {
+    return process.env.API_KEY;
+  } catch (e) {
+    return undefined;
+  }
+};
 
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set");
+const API_KEY = getApiKey();
+
+let ai: GoogleGenAI | null = null;
+
+if (API_KEY) {
+  ai = new GoogleGenAI({ apiKey: API_KEY });
+} else {
+  console.warn("Gemini API Key is missing or not configured correctly. AI Chat features will be disabled.");
 }
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const FAQ_KNOWLEDGE_BASE = `
 ### 서비스 이용 방법
@@ -31,7 +48,7 @@ const FAQ_KNOWLEDGE_BASE = `
   - **A:** 물론이죠! 저희는 모든 미미님들의 신원을 철저히 확인하고 있으며, 안전한 만남을 위해 최선을 다하고 있어요. 고객님과 미미 모두가 즐거운 시간을 보낼 수 있도록 안전 수칙을 꼭 지켜주세요! 🙏
 
 - **Q: 데이트 중 금지되는 행동이 있나요?**
-  - **A:** 네, 그럼요! 미미의 동의 없는 신체 접촉, 불쾌감을 주는 언행, 개인 정보(연락처, 주소 등)를 묻는 행위는 절대 금지예요. 서로 존중하는 아름다운 데이트 문화를 함께 만들어가요! 💕
+  - **A:** 네, 그럼요! 미미의 동의 없는 신체 접촉, 불쾌감을 주는 언행, 개인 정보(연락처, 주소 등)를 요구하거나 유포하는 행위는 절대 금지예요. 서로 존중하는 아름다운 데이트 문화를 함께 만들어가요! 💕
 
 ### 미미 관련
 - **Q: '미미'는 어떤 분들인가요?**
@@ -42,7 +59,7 @@ const FAQ_KNOWLEDGE_BASE = `
   - **A:** 예약 취소 및 환불 규정은 고객센터로 문의해주시면 친절하게 안내해 드릴게요. 📞
 
 - **Q: 미미가 되어보고 싶어요!**
-  - **A:** 언제든 환영이에요! '마이페이지'에서 '미미 신청하기'를 통해 지원할 수 있어요. 간단한 정보 입력과 사진 첨부만으로 신청이 가능하니, 망설이지 말고 지원해보세요! 🥳
+  - **A:** 언제든 환영이에요! 회원가입 시 '미미로 가입'을 선택하거나, 고객센터로 문의주시면 자세히 안내해 드릴게요! 🥳
 `;
 
 const SYSTEM_INSTRUCTION = `당신은 데이트 서비스 'rent-mimi.com'의 친절하고 상냥한 AI 어시스턴트 '미미'입니다. 당신의 임무는 주어진 '자주 묻는 질문(FAQ) 정보'를 바탕으로 고객의 질문에 답변하는 것입니다.
@@ -56,6 +73,10 @@ const SYSTEM_INSTRUCTION = `당신은 데이트 서비스 'rent-mimi.com'의 친
 6. 절대로 제공된 정보 외의 내용을 추측해서 답변하지 마세요.`;
 
 export const getFaqAnswer = async (question: string): Promise<string> => {
+  if (!ai) {
+    return "죄송해요. 현재 AI 상담 시스템을 연결할 수 없어요. (API Key 설정 확인 필요)";
+  }
+
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -64,7 +85,7 @@ export const getFaqAnswer = async (question: string): Promise<string> => {
         systemInstruction: SYSTEM_INSTRUCTION,
       }
     });
-    return response.text;
+    return response.text || "답변을 생성하지 못했어요.";
   } catch (error) {
     console.error("Error fetching FAQ answer from Gemini API:", error);
     return "죄송해요. 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요.";
