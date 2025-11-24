@@ -15,64 +15,73 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
     const [otp, setOtp] = useState('');
     const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     
     const verifierRef = useRef<RecaptchaVerifier | null>(null);
     const containerId = 'recaptcha-container-login';
 
-    // Initialize Recaptcha ON MOUNT
     useEffect(() => {
-        const initRecaptcha = async () => {
-            const container = document.getElementById(containerId);
-            if (!container) return;
-
-            // 1. Cleanup any existing instances to prevent "already rendered" error
-            if ((window as any).recaptchaVerifier) {
-                try {
-                    (window as any).recaptchaVerifier.clear();
-                } catch (e) {
-                    // ignore
-                }
-                (window as any).recaptchaVerifier = null;
-            }
-            container.innerHTML = '';
-
-            // 2. Create and Render
-            try {
-                const verifier = new RecaptchaVerifier(auth, containerId, {
-                    'size': 'invisible',
-                    'callback': () => {
-                        console.log("reCAPTCHA solved");
-                    },
-                    'expired-callback': () => {
-                        setError('보안 인증이 만료되었습니다. 페이지를 새로고침 해주세요.');
-                    }
-                });
-
-                await verifier.render();
-                verifierRef.current = verifier;
-                (window as any).recaptchaVerifier = verifier;
-            } catch (err) {
-                console.error("Recaptcha initialization failed:", err);
-            }
-        };
-
-        // Small delay to ensure DOM is painted
-        const timer = setTimeout(initRecaptcha, 100);
-
+        // Cleanup on unmount
         return () => {
-            clearTimeout(timer);
             if (verifierRef.current) {
                 try {
                     verifierRef.current.clear();
                 } catch (e) {}
+                verifierRef.current = null;
             }
-            verifierRef.current = null;
             if ((window as any).recaptchaVerifier) {
                 (window as any).recaptchaVerifier = null;
             }
         };
     }, []);
+
+    const setupRecaptcha = async () => {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error("Recaptcha container not found");
+            return null;
+        }
+
+        try {
+            // 1. Robust Cleanup
+            if (verifierRef.current) {
+                try { verifierRef.current.clear(); } catch(e) {}
+                verifierRef.current = null;
+            }
+            if ((window as any).recaptchaVerifier) {
+                try { (window as any).recaptchaVerifier.clear(); } catch(e) {}
+                (window as any).recaptchaVerifier = null;
+            }
+            
+            container.innerHTML = '';
+
+            // 2. Create new verifier
+            const verifier = new RecaptchaVerifier(auth, containerId, {
+                'size': 'invisible',
+                'callback': () => {
+                    console.log("reCAPTCHA solved");
+                },
+                'expired-callback': () => {
+                    setError('보안 인증이 만료되었습니다. 다시 시도해주세요.');
+                    setIsLoading(false);
+                    verifierRef.current = null;
+                }
+            });
+            
+            // 3. Render explicitly
+            await verifier.render();
+            
+            // 4. Store references
+            verifierRef.current = verifier;
+            (window as any).recaptchaVerifier = verifier;
+            
+            return verifier;
+        } catch (e) {
+            console.error("Recaptcha init failed", e);
+            return null;
+        }
+    };
 
     const formatPhoneNumber = (phone: string) => {
         let cleanPhone = phone.replace(/-/g, '').trim();
@@ -84,6 +93,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
 
     const handleGetCode = async () => {
         setError(null);
+        setSuccessMessage(null);
         setIsLoading(true);
         
         const cleanPhone = phone.replace(/-/g, '').trim();
@@ -94,14 +104,16 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         }
         
         if (!checkUserExists(cleanPhone)) {
-            setError('가입되지 않은 번호입니다. 회원가입을 진행해주세요.');
+            setError('가입되지 않은 번호입니다. 회원가입을 먼저 진행해주세요.');
             setIsLoading(false);
             return;
         }
 
-        // Ensure verifier is ready
-        if (!verifierRef.current) {
-             setError('보안 시스템을 불러오는 중입니다. 잠시 후 다시 시도하거나 페이지를 새로고침 해주세요.');
+        // Initialize Recaptcha Just-In-Time
+        const appVerifier = await setupRecaptcha();
+        
+        if (!appVerifier) {
+             setError('보안 시스템 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
              setIsLoading(false);
              return;
         }
@@ -109,34 +121,31 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
         const formattedPhone = formatPhoneNumber(cleanPhone);
 
         try {
-            const confirmation = await signInWithPhoneNumber(auth, formattedPhone, verifierRef.current);
+            const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
             setConfirmationResult(confirmation);
-            alert("인증번호가 발송되었습니다.\n\n[중요] 문자가 안 오면 '스팸 메시지함'을 꼭 확인해주세요.\n(테스트 번호는 지정된 코드를 입력하세요)");
+            setSuccessMessage('인증번호가 발송되었습니다.');
         } catch (error: any) {
             console.error("Error sending SMS", error);
             
+            // Cleanup on error so user can retry
+            if (verifierRef.current) {
+                try { verifierRef.current.clear(); } catch(e) {}
+                verifierRef.current = null;
+                const container = document.getElementById(containerId);
+                if (container) container.innerHTML = '';
+            }
+
             if (error.code === 'auth/internal-error') {
                 const domain = window.location.hostname;
-                const msg = `⚠️ 도메인 승인 필요 ⚠️\n\n현재 도메인: ${domain}\n\nFirebase 콘솔 > Authentication > Settings > Authorized domains 에 위 도메인을 추가해주세요.`;
-                alert(msg);
-                setError(msg);
-            } else if (error.code === 'auth/invalid-app-credential') {
-                const msg = `⛔ 앱 인증 실패 (invalid-app-credential) ⛔\n\n1. Firebase 콘솔 'Authorized domains'에 현재 도메인(${window.location.hostname})이 등록되어 있는지 확인하세요.\n2. Google Cloud Console에서 API Key 제한(HTTP Referrer) 설정을 확인하세요.`;
-                alert(msg);
-                setError(msg);
+                setError(`[설정 필요] Firebase 콘솔에 도메인(${domain})을 등록해주세요.`);
             } else if (error.code === 'auth/invalid-phone-number') {
                 setError('전화번호 형식이 올바르지 않습니다.');
             } else if (error.code === 'auth/too-many-requests') {
                 setError('너무 많은 요청을 보냈습니다. 잠시 후 다시 시도해주세요.');
             } else if (error.code === 'auth/captcha-check-failed') {
-                 setError('reCAPTCHA 검증에 실패했습니다. 다시 시도해주세요.');
+                 setError('보안 검증에 실패했습니다. 다시 시도해주세요.');
             } else {
-                setError(`인증번호 전송 실패: ${error.message}`);
-            }
-            
-            // Reset captcha on error to allow retry
-            if (verifierRef.current) {
-                try { verifierRef.current.reset(); } catch(e) {}
+                setError('인증번호 전송에 실패했습니다. 번호를 확인해주세요.');
             }
         } finally {
             setIsLoading(false);
@@ -180,72 +189,82 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToSignUp, 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-sm mx-auto">
-        <div className="flex flex-col items-center mb-8">
-          <HeartIcon className="w-16 h-16 text-primary-pink" />
-          <h1 className="text-3xl font-bold text-primary-pink mt-2">Rent-Mimi</h1>
-          <p className="text-gray-500">로그인하여 미미와 만나보세요</p>
+        {/* Logo Section */}
+        <div className="flex flex-col items-center mb-10 animate-fade-in">
+          <div className="bg-white p-4 rounded-full shadow-md mb-4">
+            <HeartIcon className="w-12 h-12 text-primary-pink" />
+          </div>
+          <h1 className="text-3xl font-bold text-accent-navy">Rent-Mimi</h1>
+          <p className="text-gray-500 mt-2 text-sm">당신의 이상형을 만나보세요</p>
         </div>
 
-        <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-lg space-y-6">
-          <div>
-            <label htmlFor="phone" className="text-sm font-medium text-gray-700">전화번호</label>
-            <div className="flex items-center mt-1">
+        <form onSubmit={handleLogin} className="bg-white p-8 rounded-3xl shadow-xl space-y-6 animate-slide-in-up border border-gray-100">
+          <div className="space-y-1">
+            <label htmlFor="phone" className="block text-sm font-bold text-gray-700 ml-1">휴대폰 번호</label>
+            <div className="flex gap-2">
               <input
                 type="tel"
                 id="phone"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
-                placeholder="예: 01012345678"
-                className="flex-grow w-full px-4 py-3 border border-gray-300 rounded-l-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink"
+                placeholder="01012345678"
+                className="flex-grow w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink/50 focus:border-primary-pink transition-all text-gray-800 placeholder-gray-400 font-medium"
               />
               <button 
                 type="button" 
                 onClick={handleGetCode} 
-                disabled={isLoading || !!confirmationResult}
-                className="flex-shrink-0 px-4 py-3 bg-gray-200 text-sm font-semibold text-gray-600 rounded-r-2xl hover:bg-gray-300 disabled:opacity-50"
+                disabled={isLoading || confirmationResult !== null}
+                className={`flex-shrink-0 px-4 py-3.5 text-sm font-bold rounded-2xl transition-all shadow-sm
+                    ${confirmationResult 
+                        ? 'bg-green-50 text-green-600 border border-green-200' 
+                        : 'bg-accent-navy text-white hover:bg-opacity-90 active:scale-95 disabled:bg-gray-300 disabled:cursor-not-allowed'
+                    }`}
               >
-                {confirmationResult ? '전송됨' : '인증번호 받기'}
+                {isLoading ? '전송중..' : confirmationResult ? '전송됨' : '인증요청'}
               </button>
             </div>
+            {successMessage && <p className="text-xs text-green-600 font-medium ml-1 mt-1 flex items-center gap-1">✅ {successMessage}</p>}
           </div>
-          {confirmationResult && (
-          <div className="animate-fade-in">
-            <label htmlFor="otp" className="text-sm font-medium text-gray-700">인증번호</label>
+
+          {/* OTP Input - Only shows after code is sent */}
+          <div className={`transition-all duration-500 ease-in-out overflow-hidden ${confirmationResult ? 'max-h-24 opacity-100' : 'max-h-0 opacity-0'}`}>
+            <label htmlFor="otp" className="block text-sm font-bold text-gray-700 ml-1 mb-1">인증번호</label>
             <input
               type="number"
               id="otp"
               value={otp}
               onChange={e => setOtp(e.target.value)}
-              placeholder="인증번호 6자리 입력"
-              className="mt-1 w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink"
+              placeholder="인증번호 6자리"
+              className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-pink/50 focus:border-primary-pink transition-all text-gray-800 font-medium tracking-widest text-center"
             />
           </div>
-          )}
 
           {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600 break-words whitespace-pre-wrap">
+              <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-xs text-red-500 font-medium break-keep text-center animate-fade-in">
                   {error}
               </div>
           )}
           
-          {/* Invisible container */}
+          {/* Container ID for invisible reCAPTCHA */}
           <div id={containerId}></div>
 
           <button
             type="submit"
             disabled={!confirmationResult || isLoading}
-            className="w-full bg-primary-pink text-white font-bold py-3 px-6 rounded-2xl transition-transform transform hover:scale-105 disabled:bg-gray-300"
+            className="w-full bg-primary-pink text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary-pink/30 hover:shadow-primary-pink/40 transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:bg-gray-300 disabled:shadow-none disabled:transform-none"
           >
-            {isLoading ? '처리중...' : '로그인'}
+            {isLoading ? '로그인 중...' : '로그인 하기'}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6">
-          아직 회원이 아니신가요?{' '}
-          <button onClick={onNavigateToSignUp} className="font-semibold text-primary-pink hover:underline">
-            회원가입하기
-          </button>
-        </p>
+        <div className="text-center mt-8">
+          <p className="text-sm text-gray-500">
+            아직 회원이 아니신가요?{' '}
+            <button onClick={onNavigateToSignUp} className="font-bold text-primary-pink hover:underline ml-1">
+              회원가입 하기
+            </button>
+          </p>
+        </div>
       </div>
     </div>
   );
